@@ -1,4 +1,8 @@
-from src.clean import normalize_text, split_bundle, strip_specs
+from src.clean import normalize_text, split_bundle, strip_specs, normalize_components, load_vocabulary
+
+from src.load import DATA_DIR
+
+VOCAB = load_vocabulary(DATA_DIR / "component_list.json")
 
 # found one interesting hyphen, so have to make sure that that one specifically works
 def test_special_hyphen():
@@ -62,3 +66,41 @@ def test_specs_in_the_middle_of_a_name():
  
 def test_clean_name_unchanged():
     assert strip_specs("SenseBook Plus")["base_name"] == "SenseBook Plus"
+
+def components(text):
+    return normalize_components(text, VOCAB)["components"]
+ 
+ 
+def test_readme_translations():
+    assert components("Sierra Kern") == "Sierra Core"
+    assert components("Magenta Bouclier Mesh") == "Magenta Shield Mesh"
+    assert components("Slate Matriz") == "Slate Matrix"
+    assert components("Teal Lien") == "Teal Link"
+ 
+ 
+def test_netz_and_rayo_follow_other_markets():
+    assert components("Lyra Netz Pulse") == "Lyra Grid Pulse"
+    assert components("Quanta Rayo") == "Quanta Beam"
+ 
+ 
+def test_all_delimiters_give_same_result():
+    expected = "Indigo Core | Lyra Kernel"
+    for text in ["Indigo Core; Lyra Kernel", "Indigo Core + Lyra Kernel", "Indigo Core, Lyra Kernel",
+                 "Indigo Core / Lyra Kernel", "Indigo Core and Lyra Kernel", "Indigo Core & Lyra Kernel",
+                 "Lyra Kernel; Indigo Core"]:          # order doesn't matter either
+        assert components(text) == expected
+ 
+ 
+def test_readme_multi_component_with_translation():
+    assert components("Magenta Lien Gewebe & Sonic Bouclier Kernel") == "Magenta Link Fabric | Sonic Shield Kernel"
+ 
+ 
+def test_unknown_component_is_flagged_not_guessed():
+    result = normalize_components("Indigo Core + Unobtanium Widget", VOCAB)
+    assert result["components"] == "Indigo Core"
+    assert result["unmatched_components"] == "Unobtanium Widget"
+ 
+ 
+def test_missing_components():
+    assert normalize_components(None, VOCAB)["components"] is None
+    assert normalize_components(float("nan"), VOCAB)["component_count"] == 0

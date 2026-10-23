@@ -3,7 +3,7 @@ import unicodedata
 
 import pandas as pd
 
-DASHES = "‐‑‒–—−" # encompasses all types of possible dashes
+DASHES = "‐‑‒–—−" # = all types of possible dashes
 DASH_PATTERN = re.compile(f"[{DASHES}]")
 
 BUNDLE_SEPARATOR = re.compile(r"\s*(?:,\s*and\s+|\s+and\s+|/+|\+|,)\s*") # = all possible separators
@@ -14,6 +14,22 @@ SPEC_PATTERNS = {
     "packaging": re.compile(r"\b(?:Starter Kit|Refurbished|Bundle|Dual-SIM)\b", re.IGNORECASE),
     "revision": re.compile(r"\bRev[A-Z]\b")
 }
+
+COMPONENT_SEPARATOR = re.compile(r"\s*(?:\+|;|,|/|&|\band\b)\s*") # = all types of delimiters
+
+#found a couple actual words that need translating, gonna implement w llm later:
+COMPONENT_TRANSLATIONS = {
+    "Kern": ("Core", "de"),
+    "Netz": ("Grid", "de"),
+    "Gewebe": ("Fabric", "de"),
+    "Modul": ("Module", "de"),
+    "Bouclier": ("Shield", "fr"),
+    "Lien": ("Link", "fr"),
+    "Matriz": ("Matrix", "es"),
+    "Rayo": ("Beam", "es"),
+}
+
+CANONICAL_DELIMITER = " | "
 
 # standardizing characters + whitespace while keeping case and accents:
 def normalize_text(text: str | None) -> str | None:
@@ -77,11 +93,62 @@ def add_base_names(products: pd.DataFrame) -> pd.DataFrame:
 
     return pd.concat([products, extracted], axis=1)
 
+# TEMPORARY: trying manually by code and seeing if maybe LLM can do better later
+
+# mapping lowercased component name to canonical spelling from component_list.json:
+def load_vocabulary(path) -> dict[str, str]:
+    import json
+
+    with open(path) as f:
+        return {c.lower(): c for c in json.load(f)}
+
+# translating component name into eng:
+def translate_component(name: str) -> str:
+    return " ".join(COMPONENT_TRANSLATIONS.get(w, (w,))[0] for w in name.split())
+
+# splitting + translating + validating component list against canonical vocab:
+def normalize_components(text: str | None, vocabulary: dict[str, str]) -> dict:
+    # check if missing values arrive as None/NaN:
+    if not isinstance(text, str) or not text:
+        return {"components": None, "unmatched_components": None, "component_count": 0}
+
+    canonical, unmatched = [], []
+
+    for raw_piece in COMPONENT_SEPARATOR.split(text):
+        if not raw_piece:
+            continue
+
+        english = translate_component(raw_piece)
+        match = vocabulary.get(english.lower())
+
+        if match:
+            canonical.append(match)
+        else:
+            unmatched.append(raw_piece) # = to be reviewed
+
+    canonical = sorted(set(canonical))
+
+    return {
+        "components": CANONICAL_DELIMITER.join(canonical) or None,
+        "unmatched_components": CANONICAL_DELIMITER.join(unmatched) or None,
+        "component_count": len(canonical),
+    }
+
+# adding canonical components + unmatched pieces + count to each record:
+def add_canonical_components(records: pd.DataFrame, vocabulary: dict[str, str]) -> pd.DataFrame:
+    records = records.copy()
+    results = records["components_norm"].map(lambda t: normalize_components(t, vocabulary))
+    extracted = pd.DataFrame(results.tolist(), index=records.index)
+
+    return pd.concat([records, extracted], axis=1)
+
 
 if __name__ == "__main__":
-    from src.load import load_all
+    from src.load import load_all, DATA_DIR
 
     records = add_normalized_columns(load_all())
+    vocabulary = load_vocabulary(DATA_DIR / "component_list.json")
+    records = add_canonical_components(records, vocabulary)
 
     changed = records["raw_model_name"] != records["model_name_norm"]
     print(f"Model names changed by normalization {changed.sum():,} of {len(records):,}")
@@ -105,6 +172,20 @@ if __name__ == "__main__":
     cols = ["product_piece", "base_name", "storage", "packaging", "revision"]
     print(products.loc[stripped, cols].sample(6, random_state=1).to_string(index=False))
 
+    has_input = records["components_norm"].notna()
+    flagged = records["unmatched_components"].notna()
+
+    print(f"\nStep 5: components normalized for {has_input.sum():,} records "
+          f"({flagged.sum():,} with unmatched pieces)")
+    
+    foreign_words = r"\b(?:" + "|".join(COMPONENT_TRANSLATIONS) + r")\b"
+    translated = records["components_norm"].str.contains(foreign_words, na=False)
+
+    print(records.loc[translated, ["components_norm", "components"]].head(6).to_string(index=False))
+ 
+    canonical_values = set(vocabulary.values())
+    all_components = records["components"].dropna().str.split(CANONICAL_DELIMITER, regex=False).explode()
+
     # additional checks for text normalization:
     assert len(records) == 52_314, "row count changed"
     assert records["model_name_norm"].notna().all(), "empty model name after normalization"
@@ -120,6 +201,10 @@ if __name__ == "__main__":
     assert (products["base_name"] != "").all(), "a name became empty after stripping"
     leftover = products["base_name"].str.contains(r"\d+\s?(?:GB|TB)|Dual-SIM|Starter Kit|Refurbished|Bundle|Rev[A-Z]\b")
     assert not leftover.any(), "spec term left in base_name"
+
+    # additional checks for normalizing components:
+    assert all_components.isin(canonical_values).all(), "component not in vocabulary"
+    assert (records.loc[has_input & ~flagged, "component_count"] > 0).all(), "components lost"
 
     print("All additional checks pass")
 
