@@ -219,11 +219,11 @@ def build_canonical_models(products: pd.DataFrame, judged: list[dict], vocabular
                 products.loc[rows, ["generic_component", "is_generic"]] = [component, True]
             else:
                 products.loc[rows, "key"] = name_to_key[c["candidate"]]
-            products.loc[rows, ["match_method", "confidence", "match_reason"]] = [
-                "llm", v["confidence"], v["reason"]]
+            products.loc[rows, ["match_method", "confidence", "match_reason"]] = ["llm", v["confidence"], v["reason"]]
         else:
             reason = v["reason"] if v else "LLM not available; kept separate"
-            products.loc[rows, ["match_method", "match_reason"]] = ["needs_review", reason]
+            confidence = v["confidence"] if v else 0.0
+            products.loc[rows, ["match_method", "confidence", "match_reason"]] = ["needs_review", confidence, reason]
  
     # --> canonical models = one per key, named after most common spelling of its trusted members:
     trusted = products[products["match_method"].isin(["exact", "normalized"])]
