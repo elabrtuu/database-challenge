@@ -18,7 +18,7 @@ SPEC_PATTERNS = {
 
 COMPONENT_SEPARATOR = re.compile(r"\s*(?:\+|;|,|/|&|\band\b)\s*") # = all types of delimiters
 
-#found a couple actual words that need translating, gonna implement w llm later:
+# found a couple actual words that need translating:
 COMPONENT_TRANSLATIONS = {
     "Kern": ("Core", "de"),
     "Netz": ("Grid", "de"),
@@ -34,7 +34,6 @@ CANONICAL_DELIMITER = " | "
 
 RESELLER_PATTERN = re.compile(r"([A-Z][a-z]{3,})([A-Z]{2})") # = to handle reseller cases
 
-# again, might replace with llm.
 LEGAL_FORM_REGION = {
     "Inc.": "US", "LLC": "US",
     "AG": "CH/DE", "GmbH": "CH/DE", "Sàrl": "CH",
@@ -104,7 +103,8 @@ def add_base_names(products: pd.DataFrame) -> pd.DataFrame:
 
     return pd.concat([products, extracted], axis=1)
 
-# TEMPORARY: trying manually by code and seeing if maybe LLM can do better later
+# This following portion could also be implemented using LLM integration, but I chose
+# to do it by code for cost + speed effectiveness:
 
 # mapping lowercased component name to canonical spelling from component_list.json:
 def load_vocabulary(path) -> dict[str, str]:
