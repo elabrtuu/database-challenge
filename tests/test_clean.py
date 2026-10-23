@@ -1,4 +1,4 @@
-from src.clean import normalize_text, split_bundle
+from src.clean import normalize_text, split_bundle, strip_specs
 
 # found one interesting hyphen, so have to make sure that that one specifically works
 def test_special_hyphen():
@@ -37,3 +37,28 @@ def test_extra_separators_found_in_data():
  
 def test_double_slash_gives_no_empty_piece():
     assert split_bundle("SignalBeam Ultra SE//SonicBuds Mini") == ["SignalBeam Ultra SE", "SonicBuds Mini"]
+
+def test_readme_spec_examples():
+    assert strip_specs("AzureRouter SE Ultra 64GB Starter Kit")["base_name"] == "AzureRouter SE Ultra"
+    assert strip_specs("AstraCam 512GB Dual-SIM")["base_name"] == "AstraCam"
+    assert strip_specs("AuroraCam 1TB Starter Kit")["base_name"] == "AuroraCam"
+ 
+ 
+def test_specs_are_kept_as_attributes():
+    result = strip_specs("VectorWatch Max Ultra 1TB Bundle")
+    assert result == {"storage": "1TB", "packaging": "Bundle", "revision": None,
+                      "base_name": "VectorWatch Max Ultra"}
+ 
+ 
+def test_revision_tag():
+    result = strip_specs("SolPad Gen Edge RevA")
+    assert result["base_name"] == "SolPad Gen Edge"
+    assert result["revision"] == "RevA"
+ 
+ 
+def test_specs_in_the_middle_of_a_name():
+    assert strip_specs("Ruby Signal Grid 256GB Dual-SIM Nightfall")["base_name"] == "Ruby Signal Grid Nightfall"
+ 
+ 
+def test_clean_name_unchanged():
+    assert strip_specs("SenseBook Plus")["base_name"] == "SenseBook Plus"
