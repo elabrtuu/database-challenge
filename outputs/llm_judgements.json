@@ -1,0 +1,26 @@
+{
+  "otalphone minz gen || opalphone mini gen": {
+    "same_product": true,
+    "confidence": 0.88,
+    "reason": "The names appear to be typo variants of OpalPhone Mini Gen, and both list the Maple Core Engine.",
+    "model": "gpt-6-luna"
+  },
+  "slate module link fp || slate module link": {
+    "same_product": true,
+    "confidence": 0.96,
+    "reason": "The component name matches exactly, and “FP” appears to be a stray tag rather than a product variant.",
+    "model": "gpt-6-luna"
+  },
+  "vega mxdule || vega module": {
+    "same_product": true,
+    "confidence": 0.99,
+    "reason": "“Mxdule” is a typo for “Module,” and both names share the Vega product name.",
+    "model": "gpt-6-luna"
+  },
+  "ycnostand gen edge || echostand gen edge": {
+    "same_product": true,
+    "confidence": 0.72,
+    "reason": "The matching Gen Edge tier, Stand name pattern, shared component, and CH market overlap suggest a typo despite the manufacturer mismatch.",
+    "model": "gpt-6-luna"
+  }
+}
