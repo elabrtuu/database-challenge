@@ -1,5 +1,5 @@
 from src.clean import (normalize_text, split_bundle, strip_specs, normalize_components, load_vocabulary,
-strip_brand_suffix, detect_generic)
+strip_brand_suffix, detect_generic, parse_manufacturer)
 
 from src.load import DATA_DIR
 
@@ -113,7 +113,6 @@ def test_missing_components():
 # brand suffixes + generic product testing:
 BRANDS = {"GoldenGate", "Ironwood", "Springboard", "Starlight", "Seabird", "Copperline", "BlueRiver"}
  
- 
 def test_readme_generic_examples():
     for name, brand, component in [("Vega Beam GoldenGate", "GoldenGate", "Vega Beam"),
                                    ("Atlas Fabric Kernel BlueRiver", "BlueRiver", "Atlas Fabric Kernel"),
@@ -143,3 +142,24 @@ def test_tier_words_are_not_brands():
  
 def test_generic_is_case_insensitive():
     assert detect_generic("Sierra matrix Node", VOCAB) == "Sierra Matrix Node"
+
+# manufacturer normalization testing:
+def test_parse_manufacturer():
+    assert parse_manufacturer("GoldenGate Networks Inc.") == {
+        "manufacturer_group": "GoldenGate", "manufacturer_division": "Networks",
+        "legal_form": "Inc.", "legal_region": "US"}
+ 
+ 
+def test_regional_subsidiaries_share_a_group():
+    names = ["ElectroPulse Devices Europe BV", "ElectroPulse Devices US LLC",
+             "ElectroPulse Devices CH AG", "ElectroPulse Devices Iberia SL"]
+    assert {parse_manufacturer(n)["manufacturer_group"] for n in names} == {"ElectroPulse"}
+ 
+ 
+def test_spanish_and_swiss_legal_forms():
+    assert parse_manufacturer("Windmill Works S.L.U.")["legal_region"] == "ES"
+    assert parse_manufacturer("Nightfall Electronics Sàrl")["legal_region"] == "CH"
+ 
+ 
+def test_missing_manufacturer():
+    assert parse_manufacturer(None)["manufacturer_group"] is None

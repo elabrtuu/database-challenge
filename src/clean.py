@@ -3,6 +3,7 @@ import unicodedata
 
 import pandas as pd
 
+
 DASHES = "‐‑‒–—−" # = all types of possible dashes
 DASH_PATTERN = re.compile(f"[{DASHES}]")
 
@@ -32,6 +33,14 @@ COMPONENT_TRANSLATIONS = {
 CANONICAL_DELIMITER = " | "
 
 RESELLER_PATTERN = re.compile(r"([A-Z][a-z]{3,})([A-Z]{2})") # = to handle reseller cases
+
+# again, might replace with llm.
+LEGAL_FORM_REGION = {
+    "Inc.": "US", "LLC": "US",
+    "AG": "CH/DE", "GmbH": "CH/DE", "Sàrl": "CH",
+    "S.L.": "ES", "S.A.": "ES", "S.L.U.": "ES", "S.A.U.":"ES", "SL": "ES",
+    "BV": "NL"
+}
 
 # standardizing characters + whitespace while keeping case and accents:
 def normalize_text(text: str | None) -> str | None:
@@ -195,6 +204,36 @@ def add_generic_flags(products: pd.DataFrame, vocabulary: dict[str, str]) -> pd.
 
     return products
 
+# splitting model names into brand + division + legal form:
+def parse_manufacturer(manufacturer: str | float | None) -> dict:
+    empty = {"manufacturer_group": None, "manufacturer_division": None, "legal_form": None, "legal_region": None}
+
+    if not isinstance(manufacturer, str) or not manufacturer:
+        return empty
+
+    words = manufacturer.split()
+    legal_form = words[-1] if words[-1] in LEGAL_FORM_REGION else None
+    core = words[:-1] if legal_form else words
+
+    return {
+        "manufacturer_group": core[0], # brand = group of related entities
+        "manufacturer_division": " ".join(core[1:]) or None,
+        "legal_form": legal_form,
+        "legal_region": LEGAL_FORM_REGION.get(legal_form),
+    }
+
+# building manufacturer table + alias table:
+def build_manufacturer_tables(products:pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    raw = products["raw_manufacturer_of_record"].dropna().unique()
+    aliases = pd.DataFrame([{"raw_manufacturer": m, **parse_manufacturer(normalize_text(m))} for m in raw])
+    groups = sorted(aliases["manufacturer_group"].dropna().unique())
+    manufacturers = pd.DataFrame({"manufacturer_id": range(1, len(groups) + 1), "manufacturer_group": groups})
+    aliases = aliases.merge(manufacturers, on="manufacturer_group", how="left")
+
+    return manufacturers, aliases.sort_values("raw_manufacturer", ignore_index=True)
+
+
+
 if __name__ == "__main__":
     from src.load import load_all, DATA_DIR
 
@@ -218,7 +257,7 @@ if __name__ == "__main__":
     stripped = products["base_name"] != products["product_piece"]
 
     print(f"\nSpecs removed from {stripped.sum():,} of {len(products):,} product rows")
-    print(f"Distinct names: {products['product_piece'].nunique():,} pieces -> "
+    print(f"Distinct names: {products['product_piece'].nunique():,} pieces into "
           f"{products['base_name'].nunique():,} base names")
  
     cols = ["product_piece", "base_name", "storage", "packaging", "revision"]
@@ -247,11 +286,19 @@ if __name__ == "__main__":
     print(f"\nBrand suffixes removed from {products['brand_suffix'].notna().sum():,} product rows "
           f"({products['reseller_code'].notna().sum():,} with reseller codes)")
     print(f"Generic products: {products['is_generic'].sum():,}")
-    print(f"Distinct names: {products['base_name'].nunique():,} base names -> "
+    print(f"Distinct names: {products['base_name'].nunique():,} base names into "
           f"{products['model_name_clean'].nunique():,} clean names")
     
     cols = ["base_name", "model_name_clean", "brand_suffix", "reseller_code", "generic_component"]
     print(products.loc[products["brand_suffix"].notna(), cols].sample(6, random_state=3).to_string(index=False))
+
+    # ---- normalizing manufacturers:
+
+    manufacturers, manufacturer_aliases = build_manufacturer_tables(products)
+    print(f"\n{len(manufacturer_aliases):,} raw manufacturer strings into "
+          f"{len(manufacturers):,} manufacturer groups")
+    print(manufacturer_aliases[manufacturer_aliases["manufacturer_group"] == "ElectroPulse"].to_string(index=False))
+ 
 
     # additional checks for text normalization:
     assert len(records) == 52_314, "row count changed"
@@ -280,6 +327,11 @@ if __name__ == "__main__":
     generic = products[products["is_generic"] & products["components"].notna()]
     agrees = [g in c.split(CANONICAL_DELIMITER) for g, c in zip(generic["generic_component"], generic["components"])]
     print(f"Generic component agrees with the record's components: {sum(agrees):,} of {len(agrees):,}")
+
+    # additional checks for manufacturer normalization:
+    assert manufacturer_aliases["manufacturer_group"].notna().all(), "manufacturer without a group"
+    assert manufacturer_aliases["legal_form"].notna().all(), "unknown legal form"
+    assert manufacturer_aliases["raw_manufacturer"].is_unique
 
     print("All additional checks pass")
 
