@@ -1,4 +1,5 @@
-from src.clean import normalize_text, split_bundle, strip_specs, normalize_components, load_vocabulary
+from src.clean import (normalize_text, split_bundle, strip_specs, normalize_components, load_vocabulary,
+strip_brand_suffix, detect_generic)
 
 from src.load import DATA_DIR
 
@@ -42,6 +43,8 @@ def test_extra_separators_found_in_data():
 def test_double_slash_gives_no_empty_piece():
     assert split_bundle("SignalBeam Ultra SE//SonicBuds Mini") == ["SignalBeam Ultra SE", "SonicBuds Mini"]
 
+
+# stripping specs + packaging tests added:
 def test_readme_spec_examples():
     assert strip_specs("AzureRouter SE Ultra 64GB Starter Kit")["base_name"] == "AzureRouter SE Ultra"
     assert strip_specs("AstraCam 512GB Dual-SIM")["base_name"] == "AstraCam"
@@ -67,6 +70,7 @@ def test_specs_in_the_middle_of_a_name():
 def test_clean_name_unchanged():
     assert strip_specs("SenseBook Plus")["base_name"] == "SenseBook Plus"
 
+# component normalization testing:
 def components(text):
     return normalize_components(text, VOCAB)["components"]
  
@@ -87,7 +91,7 @@ def test_all_delimiters_give_same_result():
     expected = "Indigo Core | Lyra Kernel"
     for text in ["Indigo Core; Lyra Kernel", "Indigo Core + Lyra Kernel", "Indigo Core, Lyra Kernel",
                  "Indigo Core / Lyra Kernel", "Indigo Core and Lyra Kernel", "Indigo Core & Lyra Kernel",
-                 "Lyra Kernel; Indigo Core"]:          # order doesn't matter either
+                 "Lyra Kernel; Indigo Core"]:
         assert components(text) == expected
  
  
@@ -104,3 +108,38 @@ def test_unknown_component_is_flagged_not_guessed():
 def test_missing_components():
     assert normalize_components(None, VOCAB)["components"] is None
     assert normalize_components(float("nan"), VOCAB)["component_count"] == 0
+
+
+# brand suffixes + generic product testing:
+BRANDS = {"GoldenGate", "Ironwood", "Springboard", "Starlight", "Seabird", "Copperline", "BlueRiver"}
+ 
+ 
+def test_readme_generic_examples():
+    for name, brand, component in [("Vega Beam GoldenGate", "GoldenGate", "Vega Beam"),
+                                   ("Atlas Fabric Kernel BlueRiver", "BlueRiver", "Atlas Fabric Kernel"),
+                                   ("Silver Kernel Beam Copperline", "Copperline", "Silver Kernel Beam")]:
+        clean = strip_brand_suffix(name, brand, BRANDS)["model_name_clean"]
+        assert clean == component
+        assert detect_generic(clean, VOCAB) == component
+ 
+ 
+def test_brand_on_a_real_model_name():
+    result = strip_brand_suffix("GoldenCam Ironwood", "Ironwood", BRANDS)
+    assert result["model_name_clean"] == "GoldenCam"
+    assert detect_generic("GoldenCam", VOCAB) is None
+ 
+ 
+def test_reseller_code_own_and_other_company():
+    own = strip_brand_suffix("Indigo Core SpringboarPF", "Springboard", BRANDS)
+    assert own["model_name_clean"] == "Indigo Core" and own["reseller_code"] == "PF"
+ 
+    other = strip_brand_suffix("EchoPhone StarlightLU", "Seabird", BRANDS)
+    assert other["model_name_clean"] == "EchoPhone" and other["reseller_brand"] == "Starlight"
+ 
+ 
+def test_tier_words_are_not_brands():
+    assert strip_brand_suffix("AzureRouter SE Ultra", "Skylark", BRANDS)["model_name_clean"] == "AzureRouter SE Ultra"
+ 
+ 
+def test_generic_is_case_insensitive():
+    assert detect_generic("Sierra matrix Node", VOCAB) == "Sierra Matrix Node"

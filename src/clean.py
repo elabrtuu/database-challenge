@@ -31,6 +31,8 @@ COMPONENT_TRANSLATIONS = {
 
 CANONICAL_DELIMITER = " | "
 
+RESELLER_PATTERN = re.compile(r"([A-Z][a-z]{3,})([A-Z]{2})") # = to handle reseller cases
+
 # standardizing characters + whitespace while keeping case and accents:
 def normalize_text(text: str | None) -> str | None:
     if text is None or (isinstance(text, float) and pd.isna(text)):
@@ -142,6 +144,56 @@ def add_canonical_components(records: pd.DataFrame, vocabulary: dict[str, str]) 
 
     return pd.concat([records, extracted], axis=1)
 
+# get brand word of a manufacturer:
+def manufacturer_brand(manufacturer: str | float | None) -> str | None:
+    if not isinstance(manufacturer, str) or not manufacturer:
+        return None
+
+    return manufacturer.split()[0]
+
+# removing trailing brand suffix from a product name:
+def strip_brand_suffix(name: str, brand: str | None, known_brands: set[str]) -> dict:
+    result = {"model_name_clean": name, "brand_suffix": None, "reseller_brand": None, "reseller_code": None}
+    words = name.split()
+
+    # to avoid stripping name down too much:
+    if len(words) < 2:
+        return result
+
+    last = words[-1]
+
+    if brand and last.lower() == brand.lower():
+        result.update(model_name_clean=" ".join(words[:-1]), brand_suffix=last)
+        return result
+
+    reseller = RESELLER_PATTERN.fullmatch(last)
+
+    if reseller:
+        owner = next((b for b in known_brands if b.startswith(reseller.group(1))), None)
+        if owner: # = only strip if prefix is a known company
+            result.update(model_name_clean=" ".join(words[:-1]), brand_suffix=last, reseller_brand=owner, reseller_code=reseller.group(2))
+
+    return result
+
+# return canonical component if the name is only comprised of component:
+def detect_generic(name: str, vocabulary: dict[str, str]) -> str | None:
+    if not isinstance(name, str):
+        return None
+    
+    return vocabulary.get(name.lower())
+
+# adding model_name_clean + brand suffix + reseller code + generic product columns:
+def add_generic_flags(products: pd.DataFrame, vocabulary: dict[str, str]) -> pd.DataFrame:
+    products = products.copy()
+    products["manufacturer_brand"] = products["manufacturer_norm"].map(manufacturer_brand)
+
+    known_brands = set(products["manufacturer_brand"].dropna())
+    stripped = [strip_brand_suffix(n, b, known_brands) for n, b in zip(products["base_name"], products["manufacturer_brand"])]
+    products = pd.concat([products, pd.DataFrame(stripped, index=products.index)], axis=1)
+    products["generic_component"] = products["model_name_clean"].map(lambda n: detect_generic(n, vocabulary))
+    products["is_generic"] = products["generic_component"].notna()
+
+    return products
 
 if __name__ == "__main__":
     from src.load import load_all, DATA_DIR
@@ -172,10 +224,12 @@ if __name__ == "__main__":
     cols = ["product_piece", "base_name", "storage", "packaging", "revision"]
     print(products.loc[stripped, cols].sample(6, random_state=1).to_string(index=False))
 
+    # ---- normalizing components:
+
     has_input = records["components_norm"].notna()
     flagged = records["unmatched_components"].notna()
 
-    print(f"\nStep 5: components normalized for {has_input.sum():,} records "
+    print(f"\nComponents normalized for {has_input.sum():,} records "
           f"({flagged.sum():,} with unmatched pieces)")
     
     foreign_words = r"\b(?:" + "|".join(COMPONENT_TRANSLATIONS) + r")\b"
@@ -185,6 +239,19 @@ if __name__ == "__main__":
  
     canonical_values = set(vocabulary.values())
     all_components = records["components"].dropna().str.split(CANONICAL_DELIMITER, regex=False).explode()
+
+    # ---- handling generic names:
+
+    products = add_generic_flags(products, vocabulary)
+
+    print(f"\nBrand suffixes removed from {products['brand_suffix'].notna().sum():,} product rows "
+          f"({products['reseller_code'].notna().sum():,} with reseller codes)")
+    print(f"Generic products: {products['is_generic'].sum():,}")
+    print(f"Distinct names: {products['base_name'].nunique():,} base names -> "
+          f"{products['model_name_clean'].nunique():,} clean names")
+    
+    cols = ["base_name", "model_name_clean", "brand_suffix", "reseller_code", "generic_component"]
+    print(products.loc[products["brand_suffix"].notna(), cols].sample(6, random_state=3).to_string(index=False))
 
     # additional checks for text normalization:
     assert len(records) == 52_314, "row count changed"
@@ -205,6 +272,14 @@ if __name__ == "__main__":
     # additional checks for normalizing components:
     assert all_components.isin(canonical_values).all(), "component not in vocabulary"
     assert (records.loc[has_input & ~flagged, "component_count"] > 0).all(), "components lost"
+
+    # additional checks for generic name handling:
+    assert (products["model_name_clean"] != "").all(), "a name became empty after brand stripping"
+    last_word = products["model_name_clean"].str.split().str[-1]
+    assert not last_word.str.fullmatch(RESELLER_PATTERN.pattern).any(), "reseller code left"
+    generic = products[products["is_generic"] & products["components"].notna()]
+    agrees = [g in c.split(CANONICAL_DELIMITER) for g, c in zip(generic["generic_component"], generic["components"])]
+    print(f"Generic component agrees with the record's components: {sum(agrees):,} of {len(agrees):,}")
 
     print("All additional checks pass")
 
